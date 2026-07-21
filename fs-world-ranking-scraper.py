@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+import pandas as pd
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://fs-world.org"
@@ -369,8 +370,29 @@ def attrition_funnel(event: EventInfo) -> dict:
     }
 
 def save_all_csv(events: list[EventInfo], out_dir: Path = OUTPUT_DIR):
-    path = out_dir / f"fsworld_events_{len(events)}-events_{time.strftime('%Y%m%d_%H%M%S')}.csv"
-    with open(path, "w", newline="") as fh:
+    csv_path = out_dir / f"fsworld_events_{len(events)}-events_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    parquet_path = out_dir / f"fsworld_events_{len(events)}-events_{time.strftime('%Y%m%d_%H%M%S')}.parquet"
+
+    rows = []
+    headers = [
+        "competition_id", "event_id", "competition_name", "event_title", "event_date", "event_class", "n_teams",
+        "rank", "university", "country",
+        "total_pts", "total_rank", "total_pct",
+        "bp_pts", "bp_rank", "bp_pct",
+        "cm_pts", "cm_rank", "cm_pct",
+        "ed_pts", "ed_rank", "ed_pct",
+        "sp_pts", "sp_rank", "sp_pct",
+        "ds_pts", "ds_rank", "ds_pct",
+        "ac_pts", "ac_rank", "ac_pct",
+        "da_pts", "da_rank", "da_pct",
+        "ax_pts", "ax_rank", "ax_pct",
+        "en_pts", "en_rank", "en_pct",
+        "ef_pts", "ef_rank", "ef_pct",
+        "td_pts", "td_rank", "td_pct",
+        "penalty_pts", "penalty_rank",
+    ]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(
             [
@@ -378,29 +400,12 @@ def save_all_csv(events: list[EventInfo], out_dir: Path = OUTPUT_DIR):
                 f"Retrieved: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}"
             ]
         )
-        writer.writerow(
-            [
-                "competition_id", "event_id", "competition_name", "event_title", "event_date", "event_class", "n_teams",
-                "rank", "university", "country",
-                "total_pts", "total_rank", "total_pct",
-                "bp_pts", "bp_rank", "bp_pct",
-                "cm_pts", "cm_rank", "cm_pct",
-                "ed_pts", "ed_rank", "ed_pct",
-                "sp_pts", "sp_rank", "sp_pct",
-                "ds_pts", "ds_rank", "ds_pct",
-                "ac_pts", "ac_rank", "ac_pct",
-                "da_pts", "da_rank", "da_pct",
-                "ax_pts", "ax_rank", "ax_pct",
-                "en_pts", "en_rank", "en_pct",
-                "ef_pts", "ef_rank", "ef_pct",
-                "td_pts", "td_rank", "td_pct",
-                "penalty_pts", "penalty_rank",
-            ]
-        )
+        writer.writerow(headers)
+
         for event in events:
             for r in event.results:
-                writer.writerow(
-                    [
+
+                row = [
                         event.competition_id, event.event_id, event.competition_name, event.event_title,
                         event.event_date, event.event_class, event.n_teams,
                         r.rank, r.university, r.country,
@@ -417,10 +422,16 @@ def save_all_csv(events: list[EventInfo], out_dir: Path = OUTPUT_DIR):
                         r.ef.points, r.ef.rank, r.ef.percent,
                         r.td.points, r.td.rank, r.td.percent,
                         r.penalty.points, r.penalty.rank,
-                    ]
-                )
+                ]
 
-    return path
+                writer.writerow(row)
+                rows.append(row)
+
+    if rows:
+        df = pd.DataFrame(rows, columns=headers)
+        df.to_parquet(parquet_path, index=False)
+
+    return csv_path
 
 
 def main():
@@ -435,8 +446,6 @@ def main():
     max_test_events = 0
 
     for idx, comp in enumerate(comps):
-        if max_test_events >= 20:
-            break
         print(f"Events fuer '{comp['name']}' (id={comp['id']}) suchen ...")
         try:
             events = discover_events_for_competition(sess, comp["id"])
@@ -446,8 +455,6 @@ def main():
         for ev in events:
             print(f"   -> Event {ev['id']}: {ev['label']}")
             print(f"number {max_test_events}")
-            if max_test_events > 20:
-                break
             try:
                 info = parse_event(sess, comp["id"], ev["id"])
                 max_test_events += 1
@@ -461,8 +468,8 @@ def main():
             # path = save_event_csv(info)
             # print(f"   -> Event gefunden: {info.event_title} ({info.n_teams} Teams) -> {path}")
 
-    path = save_all_csv(all_events)
-    print(f"\n=== Alle Events in CSV gespeichert: {path} ===\n")
+    csv_path = save_all_csv(all_events)
+    print(f"\n=== Alle Events in CSV gespeichert: {csv_path} ===\n")
     # print(f"\n=== Zusammenfassung: {len(all_events)} DC-Events gefunden ===\n")
     # for ev in all_events:
     #     funnel = attrition_funnel(ev)
