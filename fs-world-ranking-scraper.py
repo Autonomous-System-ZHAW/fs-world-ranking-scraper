@@ -81,12 +81,17 @@ class TeamResult:
     rank: int
     university: str
     country: str
-    car_class: str  # EV / CV / other
     total: DisciplineResult
+    bp: DisciplineResult = field(default_factory=DisciplineResult)   # Business Plan
+    cm: DisciplineResult = field(default_factory=DisciplineResult)   # Cost & Manufacturing
     ed: DisciplineResult = field(default_factory=DisciplineResult)   # Engineering Design
+    sp: DisciplineResult = field(default_factory=DisciplineResult)   # Skidpad
     ds: DisciplineResult = field(default_factory=DisciplineResult)   # DV Skidpad
+    ac: DisciplineResult = field(default_factory=DisciplineResult)   # Acceleration
     da: DisciplineResult = field(default_factory=DisciplineResult)   # DV Acceleration
     ax: DisciplineResult = field(default_factory=DisciplineResult)   # Autocross
+    en: DisciplineResult = field(default_factory=DisciplineResult)   # Endurance
+    ef: DisciplineResult = field(default_factory=DisciplineResult)   # Efficiency
     td: DisciplineResult = field(default_factory=DisciplineResult)   # Trackdrive/Endurance
     penalty: DisciplineResult = field(default_factory=DisciplineResult)
 
@@ -97,7 +102,9 @@ class EventInfo:
     event_id: int
     competition_name: str
     event_title: str
-    n_teams: int
+    event_class: str
+    event_date: str = ""
+    n_teams: int = 0
     results: list = field(default_factory=list)
 
 
@@ -154,20 +161,55 @@ def discover_events_for_competition(sess: RateLimitedSession, comp_id: int) -> l
     return uniq
 
 
+def parse_event_heading(soup) -> tuple[str, str, str, str]:
+    """Extract team class, event date, country code and title from the event heading."""
+    event_heading = None
+    for container in soup.select("div.content div.textbox h1"):
+        if container.find("span", class_=re.compile(r"team-class")):
+            event_heading = container
+            break
+
+    if event_heading is None:
+        raise ValueError("Event heading not found")
+    
+    team_class_span = event_heading.find("span", class_=re.compile(r"team-class"))
+    team_class = team_class_span.get_text(" ", strip=True) if team_class_span else ""
+
+    country = ""
+    flag_span = event_heading.find("span", class_="flag")
+    if flag_span is not None:
+        flag_img = flag_span.find("img")
+        if flag_img is not None and flag_img.get("src"):
+            m = re.search(r"/country/([a-z]{2})\.svg", str(flag_img["src"]))
+            if m:
+                country = m.group(1).upper()
+
+    for span in event_heading.find_all("span", class_=re.compile(r"team-class|flag")):
+        span.decompose()
+
+    heading_text = event_heading.get_text(" ", strip=True)
+    parts = [part for part in re.split(r"\s+", heading_text) if part]
+    if len(parts) >= 2:
+        event_date = parts[0]
+        event_title = " ".join(parts[1:])
+    else:
+        event_date = ""
+        event_title = heading_text
+
+    return team_class, event_date, country, event_title
+
+
 def parse_event(sess: RateLimitedSession, comp_id: int, event_id: int) -> Optional[EventInfo]:
     url = f"{BASE_URL}/competition/{comp_id}/event/{event_id}"
     soup = sess.get(url)
 
-    h1 = soup.find("h1")
-    if h1 is None:
+    try:
+        event_class, event_date, country_code, event_title = parse_event_heading(soup)
+        print(event_class, event_date, country_code, event_title)
+    except ValueError as e:
+        print(f"Error parsing event heading: {e}")
         return None
-    class_span = h1.find("span", class_="team-class")
-    event_class = class_span.get_text(strip=True) if class_span else "?"
-    event_title = h1.get_text(" ", strip=True)
 
-    # Nur Driverless Cup (DC) Events verarbeiten
-    if event_class != "DC":
-        return None
 
     table = soup.find("table", id="eventTable")
     if table is None:
@@ -199,10 +241,16 @@ def parse_event(sess: RateLimitedSession, comp_id: int, event_id: int) -> Option
         # Spaltenreihenfolge gemaess Event-Tabelle:
         # [0]=rank [1]=uni [2]=total [3]=ed [4]=ds [5]=da [6]=ax [7]=td [8]=penalty ...
         total = _parse_discipline_cell(tds[2]) if len(tds) > 2 else DisciplineResult()
+        bp = _parse_discipline_cell(tds[3]) if len(tds) > 3 else DisciplineResult()
+        cm = _parse_discipline_cell(tds[4]) if len(tds) > 4 else DisciplineResult()
         ed = _parse_discipline_cell(tds[3]) if len(tds) > 3 else DisciplineResult()
-        ds = _parse_discipline_cell(tds[4]) if len(tds) > 4 else DisciplineResult()
-        da = _parse_discipline_cell(tds[5]) if len(tds) > 5 else DisciplineResult()
+        sp = _parse_discipline_cell(tds[4]) if len(tds) > 4 else DisciplineResult()
+        ds = _parse_discipline_cell(tds[5]) if len(tds) > 5 else DisciplineResult()
+        ac = _parse_discipline_cell(tds[6]) if len(tds) > 6 else DisciplineResult()
+        da = _parse_discipline_cell(tds[7]) if len(tds) > 7 else DisciplineResult()
         ax = _parse_discipline_cell(tds[6]) if len(tds) > 6 else DisciplineResult()
+        en = _parse_discipline_cell(tds[7]) if len(tds) > 7 else DisciplineResult()
+        ef = _parse_discipline_cell(tds[7]) if len(tds) > 7 else DisciplineResult()
         td_ = _parse_discipline_cell(tds[7]) if len(tds) > 7 else DisciplineResult()
         penalty = _parse_discipline_cell(tds[8]) if len(tds) > 8 else DisciplineResult()
 
@@ -211,12 +259,17 @@ def parse_event(sess: RateLimitedSession, comp_id: int, event_id: int) -> Option
                 rank=rank,
                 university=university,
                 country=country,
-                car_class=car_class,
                 total=total,
+                bp=bp,
+                cm=cm,
                 ed=ed,
+                sp=sp,
                 ds=ds,
+                ac=ac,
                 da=da,
                 ax=ax,
+                en=en,
+                ef=ef,
                 td=td_,
                 penalty=penalty,
             )
@@ -227,13 +280,15 @@ def parse_event(sess: RateLimitedSession, comp_id: int, event_id: int) -> Option
         event_id=event_id,
         competition_name="",
         event_title=event_title,
+        event_date=event_date,
+        event_class=event_class,
         n_teams=len(results),
         results=results,
     )
 
 
 def save_event_csv(event: EventInfo, out_dir: Path = OUTPUT_DIR):
-    path = out_dir / f"dc_{event.competition_id}_{event.event_id}.csv"
+    path = out_dir / f"{event.event_date}_{event.event_title}_{event.event_class}_{event.n_teams}-teams_{event.competition_id}_{event.event_id}.csv"
     with open(path, "w", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(
@@ -244,12 +299,18 @@ def save_event_csv(event: EventInfo, out_dir: Path = OUTPUT_DIR):
         )
         writer.writerow(
             [
-                "rank", "university", "country", "car_class",
+                "rank", "university", "country",
                 "total_pts", "total_rank", "total_pct",
+                "bp_pts", "bp_rank", "bp_pct",
+                "cm_pts", "cm_rank", "cm_pct",
                 "ed_pts", "ed_rank", "ed_pct",
+                "sp_pts", "sp_rank", "sp_pct",
                 "ds_pts", "ds_rank", "ds_pct",
+                "ac_pts", "ac_rank", "ac_pct",
                 "da_pts", "da_rank", "da_pct",
                 "ax_pts", "ax_rank", "ax_pct",
+                "en_pts", "en_rank", "en_pct",
+                "ef_pts", "ef_rank", "ef_pct",
                 "td_pts", "td_rank", "td_pct",
                 "penalty_pts", "penalty_rank",
             ]
@@ -257,12 +318,18 @@ def save_event_csv(event: EventInfo, out_dir: Path = OUTPUT_DIR):
         for r in event.results:
             writer.writerow(
                 [
-                    r.rank, r.university, r.country, r.car_class,
+                    r.rank, r.university, r.country,
                     r.total.points, r.total.rank, r.total.percent,
+                    r.bp.points, r.bp.rank, r.bp.percent,
+                    r.cm.points, r.cm.rank, r.cm.percent,
                     r.ed.points, r.ed.rank, r.ed.percent,
+                    r.sp.points, r.sp.rank, r.sp.percent,
                     r.ds.points, r.ds.rank, r.ds.percent,
+                    r.ac.points, r.ac.rank, r.ac.percent,
                     r.da.points, r.da.rank, r.da.percent,
                     r.ax.points, r.ax.rank, r.ax.percent,
+                    r.en.points, r.en.rank, r.en.percent,
+                    r.ef.points, r.ef.rank, r.ef.percent,
                     r.td.points, r.td.rank, r.td.percent,
                     r.penalty.points, r.penalty.rank,
                 ]
@@ -305,14 +372,16 @@ def attrition_funnel(event: EventInfo) -> dict:
 def main():
     sess = RateLimitedSession(min_pause=1.5)
 
-    print("1) Competitions entdecken ...")
+    print("Competitions entdecken ...")
     comps = discover_competitions(sess)
-    print(f"   -> {len(comps)} Competitions gefunden")
+    print(f"    -> {len(comps)} Competitions gefunden")
 
     all_events: list[EventInfo] = []
 
-    for comp in comps:
-        print(f"2) Events fuer '{comp['name']}' (id={comp['id']}) suchen ...")
+    for idx, comp in enumerate(comps):
+        if comp["id"] != 8:
+            continue
+        print(f"Events fuer '{comp['name']}' (id={comp['id']}) suchen ...")
         try:
             events = discover_events_for_competition(sess, comp["id"])
         except requests.HTTPError as e:
@@ -320,17 +389,17 @@ def main():
             continue
         for ev in events:
             print(f"   -> Event {ev['id']}: {ev['label']}")
-            # try:
-            #     info = parse_event(sess, comp["id"], ev["id"])
-            # except requests.HTTPError as e:
-            #     print(f"   ! Event {ev['id']} Fehler: {e}")
-            #     continue
-            # if info is None:
-            #     continue  # kein DC-Event
-            # info.competition_name = comp["name"]
-            # all_events.append(info)
-            # path = save_event_csv(info)
-            # print(f"   -> DC-Event gefunden: {info.event_title} ({info.n_teams} Teams) -> {path}")
+            try:
+                info = parse_event(sess, comp["id"], ev["id"])
+            except requests.HTTPError as e:
+                print(f"   ! Event {ev['id']} Fehler: {e}")
+                continue
+            if info is None:
+                continue  # kein DC-Event
+            info.competition_name = comp["name"]
+            all_events.append(info)
+            path = save_event_csv(info)
+            print(f"   -> Event gefunden: {info.event_title} ({info.n_teams} Teams) -> {path}")
 
     # print(f"\n=== Zusammenfassung: {len(all_events)} DC-Events gefunden ===\n")
     # for ev in all_events:
