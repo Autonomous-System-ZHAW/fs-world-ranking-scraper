@@ -368,6 +368,60 @@ def attrition_funnel(event: EventInfo) -> dict:
         "penalized_teams": penalized,
     }
 
+def save_all_csv(events: list[EventInfo], out_dir: Path = OUTPUT_DIR):
+    path = out_dir / f"fsworld_events_{len(events)}-events_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    with open(path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(
+            [
+                "# Source: FS-World.org | FS-World Data License - Version 1.0 | "
+                f"Retrieved: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}"
+            ]
+        )
+        writer.writerow(
+            [
+                "competition_id", "event_id", "competition_name", "event_title", "event_date", "event_class", "n_teams",
+                "rank", "university", "country",
+                "total_pts", "total_rank", "total_pct",
+                "bp_pts", "bp_rank", "bp_pct",
+                "cm_pts", "cm_rank", "cm_pct",
+                "ed_pts", "ed_rank", "ed_pct",
+                "sp_pts", "sp_rank", "sp_pct",
+                "ds_pts", "ds_rank", "ds_pct",
+                "ac_pts", "ac_rank", "ac_pct",
+                "da_pts", "da_rank", "da_pct",
+                "ax_pts", "ax_rank", "ax_pct",
+                "en_pts", "en_rank", "en_pct",
+                "ef_pts", "ef_rank", "ef_pct",
+                "td_pts", "td_rank", "td_pct",
+                "penalty_pts", "penalty_rank",
+            ]
+        )
+        for event in events:
+            for r in event.results:
+                writer.writerow(
+                    [
+                        event.competition_id, event.event_id, event.competition_name, event.event_title,
+                        event.event_date, event.event_class, event.n_teams,
+                        r.rank, r.university, r.country,
+                        r.total.points, r.total.rank, r.total.percent,
+                        r.bp.points, r.bp.rank, r.bp.percent,
+                        r.cm.points, r.cm.rank, r.cm.percent,
+                        r.ed.points, r.ed.rank, r.ed.percent,
+                        r.sp.points, r.sp.rank, r.sp.percent,
+                        r.ds.points, r.ds.rank, r.ds.percent,
+                        r.ac.points, r.ac.rank, r.ac.percent,
+                        r.da.points, r.da.rank, r.da.percent,
+                        r.ax.points, r.ax.rank, r.ax.percent,
+                        r.en.points, r.en.rank, r.en.percent,
+                        r.ef.points, r.ef.rank, r.ef.percent,
+                        r.td.points, r.td.rank, r.td.percent,
+                        r.penalty.points, r.penalty.rank,
+                    ]
+                )
+
+    return path
+
 
 def main():
     sess = RateLimitedSession(min_pause=1.5)
@@ -378,9 +432,11 @@ def main():
 
     all_events: list[EventInfo] = []
 
+    max_test_events = 0
+
     for idx, comp in enumerate(comps):
-        if comp["id"] != 8:
-            continue
+        if max_test_events >= 20:
+            break
         print(f"Events fuer '{comp['name']}' (id={comp['id']}) suchen ...")
         try:
             events = discover_events_for_competition(sess, comp["id"])
@@ -389,8 +445,12 @@ def main():
             continue
         for ev in events:
             print(f"   -> Event {ev['id']}: {ev['label']}")
+            print(f"number {max_test_events}")
+            if max_test_events > 20:
+                break
             try:
                 info = parse_event(sess, comp["id"], ev["id"])
+                max_test_events += 1
             except requests.HTTPError as e:
                 print(f"   ! Event {ev['id']} Fehler: {e}")
                 continue
@@ -398,9 +458,11 @@ def main():
                 continue  # kein DC-Event
             info.competition_name = comp["name"]
             all_events.append(info)
-            path = save_event_csv(info)
-            print(f"   -> Event gefunden: {info.event_title} ({info.n_teams} Teams) -> {path}")
+            # path = save_event_csv(info)
+            # print(f"   -> Event gefunden: {info.event_title} ({info.n_teams} Teams) -> {path}")
 
+    path = save_all_csv(all_events)
+    print(f"\n=== Alle Events in CSV gespeichert: {path} ===\n")
     # print(f"\n=== Zusammenfassung: {len(all_events)} DC-Events gefunden ===\n")
     # for ev in all_events:
     #     funnel = attrition_funnel(ev)
